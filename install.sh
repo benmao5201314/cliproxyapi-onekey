@@ -361,68 +361,42 @@ install_or_upgrade() {
 
   local latest_version version arch install_dir config_dir data_dir auth_dir log_dir service_user
   local listen_host port proxy_url debug_bool logging_bool allow_remote_bool management_key
-  local api_keys_raw extra_args config_file env_file backup_ts
+  local config_file env_file backup_ts extra_args
   local api_keys=()
 
   latest_version="$(get_latest_version)"
-
-  echo
-  info "开始安装/升级 ${UPSTREAM_NAME}。直接回车将使用默认值。"
-  version="$(read_default "版本号，不带 v" "$latest_version")"
-  version="${version#v}"
+  version="${latest_version#v}"
   arch="$(normalize_arch)"
-  install_dir="$(read_default "安装目录" "$DEFAULT_INSTALL_DIR")"
-  config_dir="$(read_default "配置目录" "$DEFAULT_CONFIG_DIR")"
-  data_dir="$(read_default "数据目录" "$DEFAULT_DATA_DIR")"
-  auth_dir="$(read_default "OAuth/账号认证目录" "${data_dir}/auths")"
-  log_dir="$(read_default "日志目录" "$DEFAULT_LOG_DIR")"
-  service_user="$(read_default "运行服务的系统用户" "$DEFAULT_SERVICE_USER")"
-  port="$(read_default "服务端口" "$DEFAULT_PORT")"
+
+  install_dir="$DEFAULT_INSTALL_DIR"
+  config_dir="$DEFAULT_CONFIG_DIR"
+  data_dir="$DEFAULT_DATA_DIR"
+  auth_dir="${data_dir}/auths"
+  log_dir="$DEFAULT_LOG_DIR"
+  service_user="$DEFAULT_SERVICE_USER"
+  port="$DEFAULT_PORT"
+  listen_host="$DEFAULT_LISTEN_HOST"
+  proxy_url=""
+  debug_bool="false"
+  logging_bool="true"
+  allow_remote_bool="true"
+  management_key="mgmt-cpa-$(random_hex)"
+  extra_args=""
+
   validate_port "$port"
-
-  echo "监听地址说明：留空表示监听所有地址；127.0.0.1 表示仅本机访问。"
-  listen_host="$(read_default "监听地址" "$DEFAULT_LISTEN_HOST")"
-  proxy_url="$(read_default "全局代理地址，例如 socks5://127.0.0.1:1080" "")"
-
-  if read_yes_no "启用 debug 日志" "n"; then debug_bool="true"; else debug_bool="false"; fi
-  if read_yes_no "将应用日志写入文件" "y"; then logging_bool="true"; else logging_bool="false"; fi
-
-  echo
-  echo "API Key 用于客户端请求鉴权，可输入多个并用英文逗号分隔。"
-  echo "如希望安装后在 Web 管理面板中添加客户端 API Key，这里可以直接留空。"
-  api_keys_raw="$(read_default "预置客户端 API Key，留空则不预置" "")"
-  if [[ -n "$(trim "$api_keys_raw")" ]]; then
-    IFS=',' read -r -a api_keys <<< "$api_keys_raw"
-    local cleaned_keys=()
-    for i in "${!api_keys[@]}"; do
-      api_keys[$i]="$(trim "${api_keys[$i]}")"
-      [[ -n "${api_keys[$i]}" ]] && cleaned_keys+=("${api_keys[$i]}")
-    done
-    api_keys=("${cleaned_keys[@]}")
-  fi
-
-  echo
-  echo "Web 管理面板设置：管理 secret-key 是进入 /management.html 和管理 API 的初始管理员密钥。"
-  echo "注意：管理 secret-key 不能完全依赖安装后网页初始化；没有初始密钥时，远程管理接口会拒绝访问。"
-  management_key="$(read_default "管理 secret-key，留空自动生成，输入 none 禁用 Web 管理" "")"
-  if [[ -z "$(trim "$management_key")" ]]; then
-    management_key="mgmt-cpa-$(random_hex)"
-  elif [[ "${management_key,,}" == "none" || "${management_key,,}" == "disable" || "${management_key,,}" == "disabled" ]]; then
-    management_key=""
-  fi
-  if [[ -n "$management_key" ]]; then
-    if read_yes_no "允许公网/非 localhost 访问 Web 管理面板和管理接口" "y"; then allow_remote_bool="true"; else allow_remote_bool="false"; fi
-  else
-    allow_remote_bool="false"
-    warn "已禁用 Web 管理面板与远程管理接口。"
-  fi
-
-  echo
-  echo "额外启动参数示例：-local-model。没有需要时直接回车。"
-  extra_args="$(read_default "额外启动参数" "")"
-
   config_file="${config_dir}/config.yaml"
   env_file="/etc/default/${SERVICE_NAME}"
+
+  echo
+  info "开始全默认安装/升级 ${UPSTREAM_NAME}，无需填写参数。"
+  echo "版本：${version}"
+  echo "安装目录：${install_dir}"
+  echo "配置目录：${config_dir}"
+  echo "数据目录：${data_dir}"
+  echo "日志目录：${log_dir}"
+  echo "服务端口：${port}"
+  echo "Web 管理面板：启用"
+  echo "客户端 API Key：安装时不预置，可在 Web 管理面板中添加"
 
   info "创建目录与系统用户。"
   install -d -m 0755 "$install_dir" "$config_dir" "$data_dir" "$auth_dir" "$log_dir"
@@ -457,30 +431,18 @@ install_or_upgrade() {
   systemctl enable --now "${SERVICE_NAME}"
 
   echo
-  success "${UPSTREAM_NAME} 已安装并启动。"
+  success "${UPSTREAM_NAME} 已按默认配置安装并启动。"
   echo "服务状态：systemctl status ${SERVICE_NAME} --no-pager"
   echo "查看日志：journalctl -u ${SERVICE_NAME} -f"
   echo "配置文件：${config_file}"
   echo "服务地址：http://<服务器IP>:${port}"
   echo "OpenAI 兼容 API Base URL：http://<服务器IP>:${port}/v1"
-  if [[ -n "$management_key" ]]; then
-    echo "Web 管理面板：http://<服务器IP>:${port}/management.html"
-    echo "管理 secret-key：${management_key}"
-  else
-    echo "Web 管理面板：已禁用"
-  fi
+  echo "Web 管理面板：http://<服务器IP>:${port}/management.html"
+  echo "管理 secret-key：${management_key}"
+  echo "预置客户端 API Key：未设置，请登录 Web 管理面板后在 API Keys 中添加。"
   echo
-  if [[ ${#api_keys[@]} -gt 0 ]]; then
-    echo "预置客户端 API Key："
-    for key in "${api_keys[@]}"; do
-      echo "  ${key}"
-    done
-  else
-    echo "预置客户端 API Key：未设置，可登录 Web 管理面板后在 API Keys 中添加。"
-  fi
-  echo
+  echo "如果你的服务器已反代到 80/443 端口，可直接访问：http://<服务器IP>/management.html 或 https://<域名>/management.html。"
   echo "浏览器打不开时，请确认服务器防火墙/安全组已放行 TCP ${port}。"
-  echo "如你已通过 Nginx/Caddy/面板反代到 80 或 443 端口，请使用对应域名或 IP 访问 /management.html。"
   echo
   echo "常用登录命令示例："
   echo "  sudo -u ${service_user} ${install_dir}/cli-proxy-api -config ${config_file} -codex-device-login"
@@ -493,62 +455,37 @@ install_or_upgrade() {
 uninstall_app() {
   need_root
   local install_dir config_dir data_dir log_dir service_user
-  install_dir="$(read_default "安装目录" "$DEFAULT_INSTALL_DIR")"
-  config_dir="$(read_default "配置目录" "$DEFAULT_CONFIG_DIR")"
-  data_dir="$(read_default "数据目录" "$DEFAULT_DATA_DIR")"
-  log_dir="$(read_default "日志目录" "$DEFAULT_LOG_DIR")"
-  service_user="$(read_default "运行服务的系统用户" "$DEFAULT_SERVICE_USER")"
+  install_dir="$DEFAULT_INSTALL_DIR"
+  config_dir="$DEFAULT_CONFIG_DIR"
+  data_dir="$DEFAULT_DATA_DIR"
+  log_dir="$DEFAULT_LOG_DIR"
+  service_user="$DEFAULT_SERVICE_USER"
 
-  warn "即将卸载 ${UPSTREAM_NAME} 服务。"
-  if ! read_yes_no "确认继续卸载" "n"; then
-    warn "已取消卸载。"
-    return 0
-  fi
+  warn "开始彻底卸载 ${UPSTREAM_NAME}，将删除服务、程序、配置、数据、认证文件、日志和默认系统用户。"
 
   if command_exists systemctl; then
     systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
     systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
   fi
+
   rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/default/${SERVICE_NAME}"
   command_exists systemctl && systemctl daemon-reload || true
+  command_exists systemctl && systemctl reset-failed "${SERVICE_NAME}" 2>/dev/null || true
 
-  rm -rf "$install_dir"
-  success "已删除程序目录 ${install_dir}。"
-
-  if read_yes_no "是否删除配置目录 ${config_dir}" "n"; then
-    rm -rf "$config_dir"
-    success "已删除配置目录。"
-  else
-    warn "已保留配置目录 ${config_dir}。"
-  fi
-
-  if read_yes_no "是否删除认证/账号数据目录 ${data_dir}" "n"; then
-    rm -rf "$data_dir"
-    success "已删除数据目录。"
-  else
-    warn "已保留数据目录 ${data_dir}。"
-  fi
-
-  if read_yes_no "是否删除日志目录 ${log_dir}" "n"; then
-    rm -rf "$log_dir"
-    success "已删除日志目录。"
-  else
-    warn "已保留日志目录 ${log_dir}。"
-  fi
+  rm -rf "$install_dir" "$config_dir" "$data_dir" "$log_dir"
+  rm -rf "/tmp/${SERVICE_NAME}" "/tmp/${UPSTREAM_NAME}" "/tmp/cpa-onekey-test"
 
   if id "$service_user" >/dev/null 2>&1; then
-    if read_yes_no "是否删除系统用户 ${service_user}" "n"; then
-      userdel "$service_user" 2>/dev/null || warn "删除用户失败，可能仍有进程或文件占用。"
-    fi
+    userdel -r "$service_user" 2>/dev/null || userdel "$service_user" 2>/dev/null || warn "删除系统用户 ${service_user} 失败，可能仍有进程或文件占用。"
   fi
 
-  success "卸载流程完成。"
+  success "已彻底删除默认路径下的 ${UPSTREAM_NAME} 相关文件。"
 }
 
 show_menu() {
   clear || true
   echo "========================================"
-  echo " ${UPSTREAM_NAME} + Web Dashboard 一键安装脚本"
+  echo " ${UPSTREAM_NAME} + Web Dashboard 极简一键脚本"
   echo " 仓库：${GITHUB_BASE}"
   echo "========================================"
   echo "1. 安装/升级"
