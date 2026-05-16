@@ -138,6 +138,46 @@ random_hex() {
   fi
 }
 
+choose_management_key() {
+  local custom_key management_key
+  echo >&2
+  info "管理 secret-key 可自定义；直接回车将随机生成。" >&2
+  read_from_tty "请输入管理 secret-key [直接回车随机生成]: " custom_key
+  custom_key="$(trim "$custom_key")"
+  if [[ -n "$custom_key" ]]; then
+    management_key="$custom_key"
+    info "将使用你输入的管理 secret-key。" >&2
+  else
+    management_key="mgmt-cpa-$(random_hex)"
+    info "将随机生成管理 secret-key，安装完成后会再次显示。" >&2
+  fi
+  printf '%s' "$management_key"
+}
+
+get_public_ip() {
+  local endpoint ip
+  for endpoint in \
+    "https://api.ipify.org" \
+    "https://ifconfig.me/ip" \
+    "https://icanhazip.com"; do
+    ip="$(curl -fsSL --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || [[ "$ip" == *:* && "$ip" =~ ^[0-9A-Fa-f:]+$ ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
+url_host() {
+  local host="$1"
+  if [[ "$host" == *:* && "$host" != \[*\] ]]; then
+    printf '[%s]' "$host"
+  else
+    printf '%s' "$host"
+  fi
+}
+
 normalize_arch() {
   local arch
   arch="$(uname -m)"
@@ -361,7 +401,7 @@ install_or_upgrade() {
 
   local latest_version version arch install_dir config_dir data_dir auth_dir log_dir service_user
   local listen_host port proxy_url debug_bool logging_bool allow_remote_bool management_key
-  local config_file env_file backup_ts extra_args
+  local config_file env_file backup_ts extra_args public_ip access_host
   local api_keys=()
 
   latest_version="$(get_latest_version)"
@@ -380,15 +420,25 @@ install_or_upgrade() {
   debug_bool="false"
   logging_bool="true"
   allow_remote_bool="true"
-  management_key="mgmt-cpa-$(random_hex)"
+  management_key=""
   extra_args=""
+
+  echo
+  info "开始默认安装/升级 ${UPSTREAM_NAME}。除管理 secret-key 外，其余参数全部使用默认值。"
+  management_key="$(choose_management_key)"
+  public_ip="$(get_public_ip || true)"
+  if [[ -n "$public_ip" ]]; then
+    access_host="$(url_host "$public_ip")"
+  else
+    access_host="<服务器IP>"
+  fi
 
   validate_port "$port"
   config_file="${config_dir}/config.yaml"
   env_file="/etc/default/${SERVICE_NAME}"
 
   echo
-  info "开始全默认安装/升级 ${UPSTREAM_NAME}，无需填写参数。"
+  info "安装参数已确认，开始执行安装/升级。"
   echo "版本：${version}"
   echo "安装目录：${install_dir}"
   echo "配置目录：${config_dir}"
@@ -396,6 +446,7 @@ install_or_upgrade() {
   echo "日志目录：${log_dir}"
   echo "服务端口：${port}"
   echo "Web 管理面板：启用"
+  echo "管理 secret-key：已设置，安装完成后会再次显示"
   echo "客户端 API Key：安装时不预置，可在 Web 管理面板中添加"
 
   info "创建目录与系统用户。"
@@ -435,13 +486,19 @@ install_or_upgrade() {
   echo "服务状态：systemctl status ${SERVICE_NAME} --no-pager"
   echo "查看日志：journalctl -u ${SERVICE_NAME} -f"
   echo "配置文件：${config_file}"
-  echo "服务地址：http://<服务器IP>:${port}"
-  echo "OpenAI 兼容 API Base URL：http://<服务器IP>:${port}/v1"
-  echo "Web 管理面板：http://<服务器IP>:${port}/management.html"
+  if [[ -n "$public_ip" ]]; then
+    echo "识别到 VPS 外网 IP：${public_ip}"
+  else
+    echo "识别到 VPS 外网 IP：未识别，请将下面地址中的 <服务器IP> 替换为你的 VPS 外网 IP"
+  fi
+  echo "服务首页：http://${access_host}:${port}/"
+  echo "OpenAI 兼容 API Base URL：http://${access_host}:${port}/v1"
+  echo "模型列表接口：http://${access_host}:${port}/v1/models"
+  echo "Web 管理面板：http://${access_host}:${port}/management.html"
   echo "管理 secret-key：${management_key}"
   echo "预置客户端 API Key：未设置，请登录 Web 管理面板后在 API Keys 中添加。"
   echo
-  echo "如果你的服务器已反代到 80/443 端口，可直接访问：http://<服务器IP>/management.html 或 https://<域名>/management.html。"
+  echo "如果你的服务器已反代到 80/443 端口，可直接访问：http://${access_host}/management.html 或 https://<域名>/management.html。"
   echo "浏览器打不开时，请确认服务器防火墙/安全组已放行 TCP ${port}。"
   echo
   echo "常用登录命令示例："
