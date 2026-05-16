@@ -7,7 +7,7 @@
 在远程 Linux 主机上执行下面一条命令即可进入菜单。选择 **1. 安装/升级** 后，脚本会自动完成下载、配置、systemd 服务创建和启动。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/benmao5201314/cliproxyapi-onekey/main/install.sh | sudo bash
+curl -fsSL https://github.com/benmao5201314/cliproxyapi-onekey/raw/refs/heads/main/install.sh | sudo bash
 ```
 
 如果系统没有 `curl`，请先通过系统包管理器安装 `curl`，再执行上述命令。脚本需要 root 权限运行，推荐保留命令中的 `sudo bash`。
