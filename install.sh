@@ -211,14 +211,24 @@ write_config() {
     echo "remote-management:"
     echo "  allow-remote: ${allow_remote_mgmt}"
     echo "  secret-key: \"$(yaml_escape "$management_key")\""
-    echo "  disable-control-panel: false"
+    if [[ -n "$management_key" ]]; then
+      echo "  disable-control-panel: false"
+    else
+      echo "  disable-control-panel: true"
+    fi
+    echo "  disable-auto-update-panel: false"
+    echo "  panel-github-repository: \"router-for-me/Cli-Proxy-API-Management-Center\""
     echo
     echo "auth-dir: \"$(yaml_escape "$auth_dir")\""
     echo
-    echo "api-keys:"
-    for key in "${api_keys[@]}"; do
-      echo "  - \"$(yaml_escape "$key")\""
-    done
+    if [[ ${#api_keys[@]} -gt 0 ]]; then
+      echo "api-keys:"
+      for key in "${api_keys[@]}"; do
+        echo "  - \"$(yaml_escape "$key")\""
+      done
+    else
+      echo "api-keys: []"
+    fi
     echo
     echo "debug: ${debug}"
     echo "logging-to-file: ${logging_to_file}"
@@ -351,7 +361,7 @@ install_or_upgrade() {
 
   local latest_version version arch install_dir config_dir data_dir auth_dir log_dir service_user
   local listen_host port proxy_url debug_bool logging_bool allow_remote_bool management_key
-  local api_keys_raw generated_key extra_args config_file env_file backup_ts
+  local api_keys_raw extra_args config_file env_file backup_ts
   local api_keys=()
 
   latest_version="$(get_latest_version)"
@@ -379,11 +389,9 @@ install_or_upgrade() {
 
   echo
   echo "API Key 用于客户端请求鉴权，可输入多个并用英文逗号分隔。"
-  api_keys_raw="$(read_default "API Key，留空则自动生成一个强随机 Key" "")"
-  if [[ -z "$(trim "$api_keys_raw")" ]]; then
-    generated_key="sk-cpa-$(random_hex)"
-    api_keys+=("$generated_key")
-  else
+  echo "如希望安装后在 Web 管理面板中添加客户端 API Key，这里可以直接留空。"
+  api_keys_raw="$(read_default "预置客户端 API Key，留空则不预置" "")"
+  if [[ -n "$(trim "$api_keys_raw")" ]]; then
     IFS=',' read -r -a api_keys <<< "$api_keys_raw"
     local cleaned_keys=()
     for i in "${!api_keys[@]}"; do
@@ -393,20 +401,21 @@ install_or_upgrade() {
     api_keys=("${cleaned_keys[@]}")
   fi
 
-  if [[ ${#api_keys[@]} -eq 0 || -z "${api_keys[0]}" ]]; then
-    error "至少需要一个 API Key。"
-    exit 1
-  fi
-
   echo
-  echo "管理 API/控制面板设置：secret-key 用于访问管理接口；输入 none 可禁用管理接口。"
-  management_key="$(read_default "管理 secret-key，留空自动生成，输入 none 禁用" "")"
+  echo "Web 管理面板设置：管理 secret-key 是进入 /management.html 和管理 API 的初始管理员密钥。"
+  echo "注意：管理 secret-key 不能完全依赖安装后网页初始化；没有初始密钥时，远程管理接口会拒绝访问。"
+  management_key="$(read_default "管理 secret-key，留空自动生成，输入 none 禁用 Web 管理" "")"
   if [[ -z "$(trim "$management_key")" ]]; then
     management_key="mgmt-cpa-$(random_hex)"
   elif [[ "${management_key,,}" == "none" || "${management_key,,}" == "disable" || "${management_key,,}" == "disabled" ]]; then
     management_key=""
   fi
-  if read_yes_no "允许非 localhost 远程访问管理接口" "n"; then allow_remote_bool="true"; else allow_remote_bool="false"; fi
+  if [[ -n "$management_key" ]]; then
+    if read_yes_no "允许公网/非 localhost 访问 Web 管理面板和管理接口" "y"; then allow_remote_bool="true"; else allow_remote_bool="false"; fi
+  else
+    allow_remote_bool="false"
+    warn "已禁用 Web 管理面板与远程管理接口。"
+  fi
 
   echo
   echo "额外启动参数示例：-local-model。没有需要时直接回车。"
@@ -452,13 +461,26 @@ install_or_upgrade() {
   echo "服务状态：systemctl status ${SERVICE_NAME} --no-pager"
   echo "查看日志：journalctl -u ${SERVICE_NAME} -f"
   echo "配置文件：${config_file}"
-  echo "访问地址：http://<服务器IP>:${port}"
+  echo "服务地址：http://<服务器IP>:${port}"
+  echo "OpenAI 兼容 API Base URL：http://<服务器IP>:${port}/v1"
+  if [[ -n "$management_key" ]]; then
+    echo "Web 管理面板：http://<服务器IP>:${port}/management.html"
+    echo "管理 secret-key：${management_key}"
+  else
+    echo "Web 管理面板：已禁用"
+  fi
   echo
-  echo "客户端 API Key："
-  for key in "${api_keys[@]}"; do
-    echo "  ${key}"
-  done
-  echo "管理 secret-key：${management_key}"
+  if [[ ${#api_keys[@]} -gt 0 ]]; then
+    echo "预置客户端 API Key："
+    for key in "${api_keys[@]}"; do
+      echo "  ${key}"
+    done
+  else
+    echo "预置客户端 API Key：未设置，可登录 Web 管理面板后在 API Keys 中添加。"
+  fi
+  echo
+  echo "浏览器打不开时，请确认服务器防火墙/安全组已放行 TCP ${port}。"
+  echo "如你已通过 Nginx/Caddy/面板反代到 80 或 443 端口，请使用对应域名或 IP 访问 /management.html。"
   echo
   echo "常用登录命令示例："
   echo "  sudo -u ${service_user} ${install_dir}/cli-proxy-api -config ${config_file} -codex-device-login"
@@ -526,7 +548,7 @@ uninstall_app() {
 show_menu() {
   clear || true
   echo "========================================"
-  echo " ${UPSTREAM_NAME} 一键安装脚本"
+  echo " ${UPSTREAM_NAME} + Web Dashboard 一键安装脚本"
   echo " 仓库：${GITHUB_BASE}"
   echo "========================================"
   echo "1. 安装/升级"
