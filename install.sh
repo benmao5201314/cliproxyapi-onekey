@@ -41,13 +41,13 @@ need_root() {
 read_from_tty() {
   local prompt="$1"
   local __resultvar="$2"
-  local value=""
-  if [[ -r /dev/tty ]]; then
-    read -r -p "$prompt" value </dev/tty || true
+  local input_value=""
+  if [[ "${CPA_FORCE_STDIN:-0}" != "1" ]] && [[ -e /dev/tty ]] && { : </dev/tty; } 2>/dev/null; then
+    read -r -p "$prompt" input_value </dev/tty || true
   else
-    read -r -p "$prompt" value || true
+    read -r -p "$prompt" input_value || true
   fi
-  printf -v "$__resultvar" '%s' "$value"
+  printf -v "$__resultvar" '%s' "$input_value"
 }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
@@ -86,7 +86,7 @@ install_dependencies() {
 read_default() {
   local prompt="$1"
   local default_value="$2"
-  local value
+  local value=""
   if [[ -n "$default_value" ]]; then
     read_from_tty "${prompt} [${default_value}]: " value
     printf '%s' "${value:-$default_value}"
@@ -106,7 +106,7 @@ read_yes_no() {
     suffix="y/N"
   fi
   while true; do
-    read -r -p "${prompt} [${suffix}]: " value || true
+    read_from_tty "${prompt} [${suffix}]: " value
     value="${value:-$default_value}"
     case "${value,,}" in
       y|yes) return 0 ;;
